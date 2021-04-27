@@ -132,6 +132,14 @@
   revision = "22cb3e4c487ce6242e2b03369219e5631eed1221"
 
 [[projects]]
+  digest = "1:d4e4da02e9a2c3c3eb0f8ca3fc61b71b7e61f9274d8f6547b3d1daf224a35a20"
+  name = "github.com/mattn/go-sqlite3"
+  packages = ["."]
+  pruneopts = ""
+  revision = "d33341ff0d20a3b46047dba17ad897b40705c563"
+  version = "v1.14.7"
+
+[[projects]]
   digest = "1:31ba63a60f9e41b5cbb6cce48f4756718bd514fe73a1c6ee2751ec8fbf6e109f"
   name = "github.com/pmezard/go-difflib"
   packages = ["difflib"]
@@ -296,6 +304,7 @@
     "github.com/gorilla/mux",
     "github.com/gorilla/websocket",
     "github.com/lib/pq",
+    "github.com/mattn/go-sqlite3",
     "github.com/rubenv/sql-migrate",
     "github.com/satori/go.uuid",
     "github.com/stretchr/testify/assert",
