@@ -28,6 +28,7 @@ import (
 	"github.com/rubenv/sql-migrate"
 	"go.uber.org/zap"
 	"github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const (

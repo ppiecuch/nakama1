@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	"regexp"
 
 	"nakama/cmd"
 	"nakama/pkg/ga"
@@ -37,7 +38,7 @@ import (
 	"github.com/armon/go-metrics"
 	"github.com/gogo/protobuf/jsonpb"
 	_ "github.com/lib/pq"
-    _ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/satori/go.uuid"
 	"go.uber.org/zap"
 )
@@ -151,41 +152,60 @@ func main() {
 }
 
 func dbConnect(multiLogger *zap.Logger, config server.Config) (*sql.DB, string) {
-	// TODO config database pooling
-	rawurl := fmt.Sprintf("postgresql://%s", config.GetDatabase().Addresses[0])
-	url, err := url.Parse(rawurl)
-	if err != nil {
-		multiLogger.Fatal("Bad connection URL", zap.Error(err))
-	}
-	query := url.Query()
-	if len(query.Get("sslmode")) == 0 {
-		query.Set("sslmode", "disable")
-		url.RawQuery = query.Encode()
-	}
+    rawpath := config.GetDatabase().Addresses[0]
+    if match, _ := regexp.MatchString("([a-z]+)@([.a-z]+):([0-9]+)", rawpath); match {
+        // TODO config database pooling
+        rawurl := fmt.Sprintf("postgresql://%s", rawpath)
+        url, err := url.Parse(rawurl)
+        if err != nil {
+            multiLogger.Fatal("Bad connection URL", zap.Error(err))
+        }
+        query := url.Query()
+        if len(query.Get("sslmode")) == 0 {
+            query.Set("sslmode", "disable")
+            url.RawQuery = query.Encode()
+        }
 
-	if len(url.Path) < 1 {
-		url.Path = "/nakama"
-	}
+        if len(url.Path) < 1 {
+            url.Path = "/nakama"
+        }
 
-	db, err := sql.Open("postgres", url.String())
-	if err != nil {
-		multiLogger.Fatal("Error connecting to database", zap.Error(err))
-	}
-	err = db.Ping()
-	if err != nil {
-		multiLogger.Fatal("Error pinging database", zap.Error(err))
-	}
+        db, err := sql.Open("postgres", url.String())
+        if err != nil {
+            multiLogger.Fatal("Error connecting to database", zap.Error(err))
+        }
+        err = db.Ping()
+        if err != nil {
+            multiLogger.Fatal("Error pinging database", zap.Error(err))
+        }
 
-	db.SetConnMaxLifetime(time.Millisecond * time.Duration(config.GetDatabase().ConnMaxLifetimeMs))
-	db.SetMaxOpenConns(config.GetDatabase().MaxOpenConns)
-	db.SetMaxIdleConns(config.GetDatabase().MaxIdleConns)
+        db.SetConnMaxLifetime(time.Millisecond * time.Duration(config.GetDatabase().ConnMaxLifetimeMs))
+        db.SetMaxOpenConns(config.GetDatabase().MaxOpenConns)
+        db.SetMaxIdleConns(config.GetDatabase().MaxIdleConns)
 
-	var dbVersion string
-	if err := db.QueryRow("SELECT version()").Scan(&dbVersion); err != nil {
-		multiLogger.Fatal("Error querying database version", zap.Error(err))
-	}
+        var dbVersion string
+        if err := db.QueryRow("SELECT version()").Scan(&dbVersion); err != nil {
+            multiLogger.Fatal("Error querying database version", zap.Error(err))
+        }
 
-	return db, dbVersion
+        return db, dbVersion
+    } else {
+        // File exists or can be created - we assuming sqlite file
+        if status, err := IsValidPath(rawpath); !status {
+            multiLogger.Fatal("Error opening database file", zap.Error(err))
+        }
+        db, err := sql.Open("sqlite3", rawpath)
+        if err != nil {
+            multiLogger.Fatal("Error opening database", zap.Error(err))
+        }
+
+        var dbVersion string
+        if err := db.QueryRow("SELECT sqlite_version()").Scan(&dbVersion); err != nil {
+            multiLogger.Fatal("Error querying database version", zap.Error(err))
+        }
+
+        return db, dbVersion
+    }
 }
 
 // Help improve Nakama by sending anonymous usage statistics.
@@ -230,4 +250,19 @@ func newOrLoadCookie(datadir string) string {
 		ioutil.WriteFile(filePath, cookie.Bytes(), 0644)
 	}
 	return cookie.String()
+}
+
+func IsValidPath(fp string) (bool,error) {
+  // Check if file already exists
+  if _, err := os.Stat(fp); err == nil {
+    return true, nil
+  }
+  // Attempt to create it
+  var d []byte
+  if err := ioutil.WriteFile(fp, d, 0644); err == nil {
+    os.Remove(fp) // And delete it
+    return true, nil
+  } else {
+    return false, err
+  }
 }
