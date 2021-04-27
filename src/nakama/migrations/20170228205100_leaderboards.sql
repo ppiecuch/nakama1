@@ -16,17 +16,16 @@
 
 -- +migrate Up
 CREATE TABLE IF NOT EXISTS leaderboard (
-    PRIMARY KEY (id),
     id             BYTEA        NOT NULL,
     authoritative  BOOLEAN      DEFAULT FALSE,
     sort_order     SMALLINT     DEFAULT 1 NOT NULL, -- asc(0), desc(1)
     count          BIGINT       DEFAULT 0 CHECK (count >= 0) NOT NULL,
     reset_schedule VARCHAR(64), -- e.g. cron format: "* * * * * * *"
-    metadata       BYTEA        DEFAULT '{}' CHECK (length(metadata) < 16000) NOT NULL
+    metadata       BYTEA        DEFAULT '{}' CHECK (length(metadata) < 16000) NOT NULL,
+    PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS leaderboard_record (
-    PRIMARY KEY (leaderboard_id, expires_at, owner_id),
     -- Creating a foreign key constraint and defining indexes that include it
     -- in the same transaction breaks. See issue cockroachdb/cockroach#13505.
     -- In this case we prefer the indexes over the constraint.
@@ -49,7 +48,8 @@ CREATE TABLE IF NOT EXISTS leaderboard_record (
     -- Revscan is unaviodable here due to cockroachdb/cockroach#14241.
     updated_at_inverse BIGINT        CHECK (updated_at > 0) NOT NULL,
     expires_at         BIGINT        CHECK (expires_at >= 0) DEFAULT 0 NOT NULL,
-    banned_at          BIGINT        CHECK (expires_at >= 0) DEFAULT 0 NOT NULL
+    banned_at          BIGINT        CHECK (expires_at >= 0) DEFAULT 0 NOT NULL,
+    PRIMARY KEY (leaderboard_id, expires_at, owner_id)
 );
 CREATE INDEX IF NOT EXISTS owner_id_leaderboard_id_idx ON leaderboard_record (owner_id, leaderboard_id);
 CREATE INDEX IF NOT EXISTS leaderboard_id_expires_at_score_updated_at_inverse_id_idx ON leaderboard_record (leaderboard_id, expires_at, score, updated_at_inverse, id);

@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"time"
+	"regexp"
 
 	"nakama/build/generated/migration"
 
@@ -34,7 +35,6 @@ import (
 const (
 	dbErrorDuplicateDatabase = "42P04"
 	migrationTable = "migration_info"
-	dialect        = "postgres"
 	defaultLimit   = -1
 )
 
@@ -50,9 +50,10 @@ type migrationService struct {
 	logger     *zap.Logger
 	migrations *migrate.AssetMigrationSource
 	db         *sql.DB
+	dialect    string
 }
 
-func MigrationStartupCheck(logger *zap.Logger, db *sql.DB) {
+func MigrationStartupCheck(logger *zap.Logger, db *sql.DB, dialect string) {
 	migrate.SetTable(migrationTable)
 	ms := &migrate.AssetMigrationSource{
 		Asset:    migration.Asset,
@@ -107,72 +108,95 @@ func MigrateParse(args []string, logger *zap.Logger) {
 
 	ms.parseSubcommand(args[1:])
 
-	rawUrl := fmt.Sprintf("postgresql://%s", ms.dbAddress)
-	parsedUrl, err := url.Parse(rawUrl)
-	if err != nil {
-		logger.Fatal("Bad connection URL", zap.Error(err))
-	}
+    if match, _ := regexp.MatchString("([a-z]+)@([.a-z]+):([0-9]+)", ms.dbAddress); match {
+        rawUrl := fmt.Sprintf("postgresql://%s", ms.dbAddress)
+        parsedUrl, err := url.Parse(rawUrl)
+        if err != nil {
+            logger.Fatal("Bad connection URL", zap.Error(err))
+        }
 
-	query := parsedUrl.Query()
-	if len(query.Get("sslmode")) == 0 {
-		query.Set("sslmode", "disable")
-		parsedUrl.RawQuery = query.Encode()
-	}
+        query := parsedUrl.Query()
+        if len(query.Get("sslmode")) == 0 {
+            query.Set("sslmode", "disable")
+            parsedUrl.RawQuery = query.Encode()
+        }
 
-	dbname := "nakama"
-	if len(parsedUrl.Path) > 1 {
-		dbname = parsedUrl.Path[1:]
-	}
+        dbname := "nakama"
+        if len(parsedUrl.Path) > 1 {
+            dbname = parsedUrl.Path[1:]
+        }
 
-	logger.Info("Database connection", zap.String("db", ms.dbAddress))
+        logger.Info("Database connection", zap.String("db", ms.dbAddress))
 
-	parsedUrl.Path = ""
-	db, err := sql.Open(dialect, parsedUrl.String())
-	if err != nil {
-		logger.Fatal("Failed to open database", zap.Error(err))
-	}
-	if err = db.Ping(); err != nil {
-		logger.Fatal("Error pinging database", zap.Error(err))
-	}
+        parsedUrl.Path = ""
+        db, err := sql.Open("postgres", parsedUrl.String())
+        if err != nil {
+            logger.Fatal("Failed to open database", zap.Error(err))
+        }
+        if err = db.Ping(); err != nil {
+            logger.Fatal("Error pinging database", zap.Error(err))
+        }
 
-	var dbVersion string
-	if err = db.QueryRow("SELECT version()").Scan(&dbVersion); err != nil {
-		logger.Fatal("Error querying database version", zap.Error(err))
-	}
-	logger.Info("Database information", zap.String("version", dbVersion))
+        var dbVersion string
+        if err = db.QueryRow("SELECT version()").Scan(&dbVersion); err != nil {
+            logger.Fatal("Error querying database version", zap.Error(err))
+        }
+        logger.Info("Database information", zap.String("version", dbVersion))
 
-	if _, err = db.Exec(fmt.Sprintf("CREATE DATABASE %s", dbname)); err != nil {
-		if e, ok := err.(*pq.Error); ok && e.Code == dbErrorDuplicateDatabase {
-			logger.Info("Using existing database", zap.String("name", dbname))
-		} else {
-			logger.Fatal("Database query failed", zap.Error(err))
-		}
-	} else {
-		logger.Info("Creating new database", zap.String("name", dbname))
-	}
-	db.Close()
+        if _, err = db.Exec(fmt.Sprintf("CREATE DATABASE %s", dbname)); err != nil {
+            if e, ok := err.(*pq.Error); ok && e.Code == dbErrorDuplicateDatabase {
+                logger.Info("Using existing database", zap.String("name", dbname))
+            } else {
+                logger.Fatal("Database query failed", zap.Error(err))
+            }
+        } else {
+            logger.Info("Creating new database", zap.String("name", dbname))
+        }
+        db.Close()
 
-	// Append dbname to data source name.
-	parsedUrl.Path = fmt.Sprintf("/%s", dbname)
-	db, err = sql.Open(dialect, parsedUrl.String())
-	if err != nil {
-		logger.Fatal("Failed to open database", zap.Error(err))
-	}
-	if err = db.Ping(); err != nil {
-		logger.Fatal("Error pinging database", zap.Error(err))
-	}
-	ms.db = db
+        // Append dbname to data source name.
+        parsedUrl.Path = fmt.Sprintf("/%s", dbname)
+        db, err = sql.Open("postgres", parsedUrl.String())
+        if err != nil {
+            logger.Fatal("Failed to open database", zap.Error(err))
+        }
+        if err = db.Ping(); err != nil {
+            logger.Fatal("Error pinging database", zap.Error(err))
+        }
+
+        ms.db = db
+        ms.dialect = "postgres"
+    } else {
+        dbpath := ms.dbAddress
+        db, err := sql.Open("sqlite3", dbpath)
+        if err != nil {
+            logger.Fatal("Failed to open database", zap.Error(err))
+        }
+
+        var dbVersion string
+        if err = db.QueryRow("SELECT sqlite_version()").Scan(&dbVersion); err != nil {
+            logger.Fatal("Error querying database version", zap.Error(err))
+        }
+        logger.Info("Database information", zap.String("version", dbVersion))
+
+        ms.db = db
+        ms.dialect = "sqlite3"
+    }
 
 	exec()
 	os.Exit(0)
 }
 
 func (ms *migrationService) up() {
+	if ms.dialect == "" {
+		ms.logger.Fatal("Driver dialect is empty")
+	}
+
 	if ms.limit < defaultLimit {
 		ms.limit = 0
 	}
 
-	appliedMigrations, err := migrate.ExecMax(ms.db, dialect, ms.migrations, migrate.Up, ms.limit)
+	appliedMigrations, err := migrate.ExecMax(ms.db, ms.dialect, ms.migrations, migrate.Up, ms.limit)
 	if err != nil {
 		ms.logger.Fatal("Failed to apply migrations", zap.Int("count", appliedMigrations), zap.Error(err))
 	}
@@ -181,11 +205,15 @@ func (ms *migrationService) up() {
 }
 
 func (ms *migrationService) down() {
+	if ms.dialect == "" {
+		ms.logger.Fatal("Driver dialect is empty")
+	}
+
 	if ms.limit < defaultLimit {
 		ms.limit = 1
 	}
 
-	appliedMigrations, err := migrate.ExecMax(ms.db, dialect, ms.migrations, migrate.Down, ms.limit)
+	appliedMigrations, err := migrate.ExecMax(ms.db, ms.dialect, ms.migrations, migrate.Down, ms.limit)
 	if err != nil {
 		ms.logger.Fatal("Failed to migrate back", zap.Int("count", appliedMigrations), zap.Error(err))
 	}
@@ -198,13 +226,13 @@ func (ms *migrationService) redo() {
 		ms.logger.Warn("Limit is ignored when redo is invoked")
 	}
 
-	appliedMigrations, err := migrate.ExecMax(ms.db, dialect, ms.migrations, migrate.Down, 1)
+	appliedMigrations, err := migrate.ExecMax(ms.db, ms.dialect, ms.migrations, migrate.Down, 1)
 	if err != nil {
 		ms.logger.Fatal("Failed to migrate back", zap.Int("count", appliedMigrations), zap.Error(err))
 	}
 	ms.logger.Info("Successfully migrated back", zap.Int("count", appliedMigrations))
 
-	appliedMigrations, err = migrate.ExecMax(ms.db, dialect, ms.migrations, migrate.Up, 1)
+	appliedMigrations, err = migrate.ExecMax(ms.db, ms.dialect, ms.migrations, migrate.Up, 1)
 	if err != nil {
 		ms.logger.Fatal("Failed to apply migrations", zap.Int("count", appliedMigrations), zap.Error(err))
 	}
@@ -212,6 +240,10 @@ func (ms *migrationService) redo() {
 }
 
 func (ms *migrationService) status() {
+	if ms.dialect == "" {
+		ms.logger.Fatal("Driver dialect is empty")
+	}
+
 	if ms.limit > defaultLimit {
 		ms.logger.Warn("Limit is ignored when status is invoked")
 	}
@@ -221,7 +253,7 @@ func (ms *migrationService) status() {
 		ms.logger.Fatal("Could not find migrations", zap.Error(err))
 	}
 
-	records, err := migrate.GetMigrationRecords(ms.db, dialect)
+	records, err := migrate.GetMigrationRecords(ms.db, ms.dialect)
 	if err != nil {
 		ms.logger.Fatal("Could not get migration records", zap.Error(err))
 	}

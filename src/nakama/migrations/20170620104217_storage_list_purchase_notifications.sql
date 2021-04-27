@@ -16,13 +16,13 @@
 
 -- +migrate Up
 -- NOTE: not postgres compatible, it expects table.index rather than table@index.
-DROP INDEX IF EXISTS storage@read_idx;
-DROP INDEX IF EXISTS storage@write_idx;
-DROP INDEX IF EXISTS storage@version_idx;
-DROP INDEX IF EXISTS storage@user_id_bucket_updated_at_idx;
-DROP INDEX IF EXISTS storage@user_id_deleted_at_idx;
-DROP INDEX IF EXISTS storage@user_id_bucket_deleted_at_idx;
-DROP INDEX IF EXISTS storage@user_id_bucket_collection_deleted_at_idx;
+DROP INDEX IF EXISTS storage.read_idx;
+DROP INDEX IF EXISTS storage.write_idx;
+DROP INDEX IF EXISTS storage.version_idx;
+DROP INDEX IF EXISTS storage.user_id_bucket_updated_at_idx;
+DROP INDEX IF EXISTS storage.user_id_deleted_at_idx;
+DROP INDEX IF EXISTS storage.user_id_bucket_deleted_at_idx;
+DROP INDEX IF EXISTS storage.user_id_bucket_collection_deleted_at_idx;
 
 -- List by user first, then keep narrowing down.
 CREATE INDEX IF NOT EXISTS deleted_at_user_id_read_bucket_collection_record_idx ON storage (deleted_at, user_id, read, bucket, collection, record);
@@ -34,14 +34,14 @@ CREATE INDEX IF NOT EXISTS deleted_at_bucket_read_collection_record_user_id_idx 
 CREATE INDEX IF NOT EXISTS deleted_at_bucket_collection_read_record_user_id_idx ON storage (deleted_at, bucket, collection, read, record, user_id);
 
 CREATE TABLE IF NOT EXISTS purchase (
-    PRIMARY KEY (user_id, provider, receipt_id), -- ad-hoc purchase lookup
     user_id         BYTEA        NOT NULL,
     provider        SMALLINT     NOT NULL, -- google(0), apple(1)
     product_id      VARCHAR(255) NOT NULL,
     receipt_id      VARCHAR(255) NOT NULL, -- the transaction ID
     receipt         BYTEA        NOT NULL,
     provider_resp   BYTEA        NOT NULL,
-    created_at      BIGINT       CHECK (created_at > 0) NOT NULL
+    created_at      BIGINT       CHECK (created_at > 0) NOT NULL,
+    PRIMARY KEY (user_id, provider, receipt_id) -- ad-hoc purchase lookup
 );
 
 -- look up purchase by ID and retrieve user. This must be unique.
@@ -52,7 +52,6 @@ CREATE INDEX IF NOT EXISTS purchase_user_id_created_at_provider_receipt_id_idx O
 CREATE INDEX IF NOT EXISTS purchase_created_at_user_id_provider_receipt_id_idx ON purchase (created_at, user_id, provider, receipt_id);
 
 CREATE TABLE IF NOT EXISTS notification (
-    PRIMARY KEY (id),
     id              BYTEA        NOT NULL,
     user_id         BYTEA        NOT NULL,
     subject         VARCHAR(255) NOT NULL,
@@ -61,7 +60,8 @@ CREATE TABLE IF NOT EXISTS notification (
     sender_id       BYTEA,                      -- NULL for System messages
     created_at      BIGINT       CHECK (created_at > 0) NOT NULL,
     expires_at      BIGINT       CHECK (expires_at > created_at) NOT NULL,
-    deleted_at      BIGINT       DEFAULT 0 NOT NULL
+    deleted_at      BIGINT       DEFAULT 0 NOT NULL,
+    PRIMARY KEY (id)
 );
 
 -- list notifications for a user that are not deleted or expired, starting from a given ID (cursor).

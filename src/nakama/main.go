@@ -83,11 +83,11 @@ func main() {
 	multiLogger.Info("Data directory", zap.String("path", config.GetDataDir()))
 	multiLogger.Info("Database connections", zap.Strings("dsns", config.GetDatabase().Addresses))
 
-	db, dbVersion := dbConnect(multiLogger, config)
+	db, dbVersion, dbDialect := dbConnect(multiLogger, config)
 	multiLogger.Info("Database information", zap.String("version", dbVersion))
 
 	// Check migration status and log if the schema has diverged.
-	cmd.MigrationStartupCheck(multiLogger, db)
+	cmd.MigrationStartupCheck(multiLogger, db, dbDialect)
 
 	jsonpbMarshaler := &jsonpb.Marshaler{
 		EnumsAsInts:  true,
@@ -151,7 +151,7 @@ func main() {
 	select {}
 }
 
-func dbConnect(multiLogger *zap.Logger, config server.Config) (*sql.DB, string) {
+func dbConnect(multiLogger *zap.Logger, config server.Config) (*sql.DB, string, string) {
     rawpath := config.GetDatabase().Addresses[0]
     if match, _ := regexp.MatchString("([a-z]+)@([.a-z]+):([0-9]+)", rawpath); match {
         // TODO config database pooling
@@ -188,7 +188,7 @@ func dbConnect(multiLogger *zap.Logger, config server.Config) (*sql.DB, string) 
             multiLogger.Fatal("Error querying database version", zap.Error(err))
         }
 
-        return db, dbVersion
+        return db, dbVersion, "postgres"
     } else {
         // File exists or can be created - we assuming sqlite file
         if status, err := IsValidPath(rawpath); !status {
@@ -204,7 +204,7 @@ func dbConnect(multiLogger *zap.Logger, config server.Config) (*sql.DB, string) 
             multiLogger.Fatal("Error querying database version", zap.Error(err))
         }
 
-        return db, dbVersion
+        return db, dbVersion, "sqlite3"
     }
 }
 

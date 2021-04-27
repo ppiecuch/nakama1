@@ -13,7 +13,7 @@
 # limitations under the License.
 
 BINNAME := nakama
-VERSION := 1.4.3
+VERSION := 1.4.4
 BUILDDIR := build
 COMMITID := $(shell git rev-parse --short HEAD 2>/dev/null || echo nosha)
 DOCKERDIR := install/docker/nakama
@@ -46,6 +46,7 @@ default help:
 	@echo "   docker      Build local docker image and tag it with the version."
 	@echo "   dockerpush  Push the local docker image to Docker Hub."
 	@echo "   test        Execute all development tests."
+	@echo "   ensure      Perform 'dep ensure' and update package dependencies."
 	@echo "   vet         Perform static error checks against the source.\n"
 
 .PHONY: all
@@ -126,6 +127,10 @@ pkg/client/client.pb.go: PROTOCFLAGS := -I . -I vendor --gogoslick_out=.
 
 %.pb.go: %.proto
 	${PROTOC} ${PROTOCFLAGS} $^
+
+.PHONY: ensure
+ensure:
+	dep ensure
 
 .PHONY: gettools
 gettools:
